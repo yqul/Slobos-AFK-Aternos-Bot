@@ -1,4 +1,3 @@
-```js
 function createBot() {
   if (isReconnecting) {
     addLog("[Bot] Reconnect already scheduled - skipping.");
@@ -27,7 +26,7 @@ function createBot() {
   }
 
   addLog("[Bot] Creating bot instance...");
-  addLog(`[Bot] Connecting to ${host}:${port}`);
+  addLog("[Bot] Connecting to " + host + ":" + port);
 
   try {
     /*
@@ -35,7 +34,7 @@ function createBot() {
      * Version automatisch erkennen lassen.
      *
      * Wenn in settings.json eine falsche/zu alte Version steht,
-     * kann das zu ECONNRESET bzw. Protocol-Fehlern führen.
+     * kann das zu ECONNRESET bzw. Protocol-Fehlern fuehren.
      */
     const configuredVersion =
       typeof config.server.version === "string"
@@ -46,7 +45,7 @@ function createBot() {
       username: config["bot-account"].username,
       password: config["bot-account"].password || undefined,
 
-      // Für deinen cracked/offline Server:
+      // Fuer deinen cracked/offline Server:
       auth: config["bot-account"].type || "offline",
 
       host,
@@ -61,11 +60,7 @@ function createBot() {
       checkTimeoutInterval: 600000,
     };
 
-    addLog(
-      `[Bot] Configured version: ${
-        configuredVersion || "auto-detect"
-      }`
-    );
+    addLog("[Bot] Configured version: " + (configuredVersion || "auto-detect"));
 
     bot = mineflayer.createBot(botOptions);
 
@@ -73,7 +68,7 @@ function createBot() {
 
     clearBotTimeouts();
 
-    // 150 Sekunden für Aternos-Start/Join
+    // 150 Sekunden fuer Aternos-Start/Join
     connectionTimeoutId = setTimeout(() => {
       if (!botState.connected && bot) {
         addLog("[Bot] Connection timeout - no spawn received.");
@@ -102,20 +97,16 @@ function createBot() {
       botState.wasThrottled = false;
       isReconnecting = false;
 
-      addLog(
-        `[Bot] [+] Successfully spawned! Minecraft version: ${bot.version}`
-      );
+      addLog("[Bot] [+] Successfully spawned! Minecraft version: " + bot.version);
 
-      // minecraft-data immer mit der tatsächlich verwendeten
+      // minecraft-data immer mit der tatsaechlich verwendeten
       // Server-Version laden
       let mcData;
 
       try {
         mcData = require("minecraft-data")(bot.version);
       } catch (err) {
-        addLog(
-          `[Bot] minecraft-data error for ${bot.version}: ${err.message}`
-        );
+        addLog("[Bot] minecraft-data error for " + bot.version + ": " + err.message);
 
         try {
           bot.end();
@@ -146,9 +137,7 @@ function createBot() {
             bot.chat("/gamemode creative");
             addLog("[Bot] Attempted /gamemode creative");
           } catch (err) {
-            addLog(
-              `[Bot] Creative command failed: ${err.message}`
-            );
+            addLog("[Bot] Creative command failed: " + err.message);
           }
         }
       }, 3000);
@@ -167,7 +156,7 @@ function createBot() {
         kickReason = String(reason);
       }
 
-      addLog(`[Bot] KICKED: ${kickReason}`);
+      addLog("[Bot] KICKED: " + kickReason);
 
       botState.connected = false;
 
@@ -191,7 +180,7 @@ function createBot() {
       }
 
       // NICHT hier reconnecten.
-      // "end" übernimmt das.
+      // "end" uebernimmt das.
     });
 
     // Verbindung beendet
@@ -201,11 +190,7 @@ function createBot() {
 
       botState.connected = false;
 
-      addLog(
-        `[Bot] Connection ended: ${
-          reason || "unknown reason"
-        }`
-      );
+      addLog("[Bot] Connection ended: " + (reason || "unknown reason"));
 
       if (bot) {
         try {
@@ -215,7 +200,7 @@ function createBot() {
 
       bot = null;
 
-      // Nur reconnecten, wenn der Bot grundsätzlich laufen soll
+      // Nur reconnecten, wenn der Bot grundsaetzlich laufen soll
       if (botRunning) {
         scheduleReconnect();
       }
@@ -228,7 +213,7 @@ function createBot() {
           ? err.message
           : String(err);
 
-      addLog(`[Bot] ERROR: ${message}`);
+      addLog("[Bot] ERROR: " + message);
 
       botState.errors.push({
         type: "error",
@@ -243,7 +228,7 @@ function createBot() {
       // ECONNRESET, EPIPE usw. werden von "end" behandelt.
     });
 
-    // Zusätzliche Debug-Ausgabe
+    // Zusaetzliche Debug-Ausgabe
     bot.on("login", () => {
       addLog("[Bot] Login packet received.");
     });
@@ -253,9 +238,7 @@ function createBot() {
     });
 
   } catch (err) {
-    addLog(
-      `[Bot] Failed to create bot: ${err.message}`
-    );
+    addLog("[Bot] Failed to create bot: " + err.message);
 
     bot = null;
 
@@ -264,4 +247,5 @@ function createBot() {
     }
   }
 }
-```
+
+module.exports = createBot;
