@@ -1,267 +1,87 @@
-```js
-function createBot() {
-  if (isReconnecting) {
-    addLog("[Bot] Reconnect already scheduled - skipping.");
-    return;
-  }
-
-  // Alten Bot sauber beenden
-  if (bot) {
-    clearAllIntervals();
-    clearBotTimeouts();
-
-    try {
-      bot.removeAllListeners();
-      bot.end();
-    } catch (_) {}
-
-    bot = null;
-  }
-
-  const host = String(config.server.ip || "").trim();
-  const port = Number(config.server.port);
-
-  if (!host || !port) {
-    addLog("[Bot] ERROR: Server IP oder Port fehlt.");
-    return;
-  }
-
-  addLog("[Bot] Creating bot instance...");
-  addLog(`[Bot] Connecting to ${host}:${port}`);
-
-  try {
-    /*
-     * WICHTIG:
-     * Version automatisch erkennen lassen.
-     *
-     * Wenn in settings.json eine falsche/zu alte Version steht,
-     * kann das zu ECONNRESET bzw. Protocol-Fehlern führen.
-     */
-    const configuredVersion =
-      typeof config.server.version === "string"
-        ? config.server.version.trim()
-        : "";
-
-    const botOptions = {
-      username: config["bot-account"].username,
-      password: config["bot-account"].password || undefined,
-
-      // Für deinen cracked/offline Server:
-      auth: config["bot-account"].type || "offline",
-
-      host,
-      port,
-
-      // Automatische Server-Versionserkennung
-      version: false,
-
-      hideErrors: false,
-
-      // Minecraft-Verbindung nicht zu aggressiv abbrechen
-      checkTimeoutInterval: 600000,
-    };
-
-    addLog(
-      `[Bot] Configured version: ${
-        configuredVersion || "auto-detect"
-      }`
-    );
-
-    bot = mineflayer.createBot(botOptions);
-
-    bot.loadPlugin(pathfinder);
-
-    clearBotTimeouts();
-
-    // 150 Sekunden für Aternos-Start/Join
-    connectionTimeoutId = setTimeout(() => {
-      if (!botState.connected && bot) {
-        addLog("[Bot] Connection timeout - no spawn received.");
-
-        try {
-          bot.removeAllListeners();
-          bot.end();
-        } catch (_) {}
-
-        bot = null;
-        scheduleReconnect();
-      }
-    }, 150000);
-
-    let spawnHandled = false;
-
-    bot.once("spawn", () => {
-      if (spawnHandled) return;
-      spawnHandled = true;
-
-      clearBotTimeouts();
-
-      botState.connected = true;
-      botState.lastActivity = Date.now();
-      botState.reconnectAttempts = 0;
-      botState.wasThrottled = false;
-      isReconnecting = false;
-
-      addLog(
-        `[Bot] [+] Successfully spawned! Minecraft version: ${bot.version}`
-      );
-
-      // minecraft-data immer mit der tatsächlich verwendeten
-      // Server-Version laden
-      let mcData;
-
-      try {
-        mcData = require("minecraft-data")(bot.version);
-      } catch (err) {
-        addLog(
-          `[Bot] minecraft-data error for ${bot.version}: ${err.message}`
-        );
-
-        try {
-          bot.end();
-        } catch (_) {}
-
-        return;
-      }
-
-      const defaultMove = new Movements(bot, mcData);
-
-      defaultMove.allowFreeMotion = false;
-      defaultMove.canDig = false;
-      defaultMove.liquidCost = 1000;
-      defaultMove.fallDamageCost = 1000;
-
-      initializeModules(bot, mcData, defaultMove);
-
-      addLog("[Bot] [+] All modules initialized.");
-
-      // Optional Creative
-      setTimeout(() => {
-        if (
-          bot &&
-          botState.connected &&
-          config.server["try-creative"]
-        ) {
-          try {
-            bot.chat("/gamemode creative");
-            addLog("[Bot] Attempted /gamemode creative");
-          } catch (err) {
-            addLog(
-              `[Bot] Creative command failed: ${err.message}`
-            );
-          }
-        }
-      }, 3000);
-    });
-
-    // Server kick
-    bot.on("kicked", (reason) => {
-      let kickReason;
-
-      try {
-        kickReason =
-          typeof reason === "object"
-            ? JSON.stringify(reason)
-            : String(reason);
-      } catch (_) {
-        kickReason = String(reason);
-      }
-
-      addLog(`[Bot] KICKED: ${kickReason}`);
-
-      botState.connected = false;
-
-      botState.errors.push({
-        type: "kicked",
-        reason: kickReason,
-        time: Date.now(),
-      });
-
-      clearAllIntervals();
-
-      const reasonLower = kickReason.toLowerCase();
-
-      if (
-        reasonLower.includes("throttl") ||
-        reasonLower.includes("too fast") ||
-        reasonLower.includes("wait before reconnect")
-      ) {
-        botState.wasThrottled = true;
-        addLog("[Bot] Server throttle detected.");
-      }
-
-      // NICHT hier reconnecten.
-      // "end" übernimmt das.
-    });
-
-    // Verbindung beendet
-    bot.on("end", (reason) => {
-      clearBotTimeouts();
-      clearAllIntervals();
-
-      botState.connected = false;
-
-      addLog(
-        `[Bot] Connection ended: ${
-          reason || "unknown reason"
-        }`
-      );
-
-      if (bot) {
-        try {
-          bot.removeAllListeners();
-        } catch (_) {}
-      }
-
-      bot = null;
-
-      // Nur reconnecten, wenn der Bot grundsätzlich laufen soll
-      if (botRunning) {
-        scheduleReconnect();
-      }
-    });
-
-    // Netzwerk-/Mineflayer-Fehler
-    bot.on("error", (err) => {
-      const message =
-        err && err.message
-          ? err.message
-          : String(err);
-
-      addLog(`[Bot] ERROR: ${message}`);
-
-      botState.errors.push({
-        type: "error",
-        message,
-        time: Date.now(),
-      });
-
-      if (botState.errors.length > 100) {
-        botState.errors = botState.errors.slice(-50);
-      }
-
-      // ECONNRESET, EPIPE usw. werden von "end" behandelt.
-    });
-
-    // Zusätzliche Debug-Ausgabe
-    bot.on("login", () => {
-      addLog("[Bot] Login packet received.");
-    });
-
-    bot.on("resourcePack", () => {
-      addLog("[Bot] Server requested a resource pack.");
-    });
-
-  } catch (err) {
-    addLog(
-      `[Bot] Failed to create bot: ${err.message}`
-    );
-
-    bot = null;
-
-    if (botRunning) {
-      scheduleReconnect();
+{
+  "name": "BilalSeinAsker",
+  "bot-account": {
+    "username": "BilalSeinAsker",
+    "password": "chalol78",
+    "type": "offline"
+  },
+  "server": {
+    "ip": "FitnaCraft_CGN.aternos.me",
+    "port": 38595,
+    "version": "1.21.11",
+    "try-creative": false
+  },
+  "position": {
+    "enabled": true,
+    "x": 0,
+    "y": 100,
+    "z": 0
+  },
+  "utils": {
+    "auto-auth": {
+      "enabled": true,
+      "password": "chalol78"
+    },
+    "anti-afk": {
+      "enabled": true,
+      "sneak": true
+    },
+    "chat-messages": {
+      "enabled": false,
+      "repeat": false,
+      "repeat-delay": 120,
+      "messages": [
+        "I'm a regular player",
+        "Subscribe to Slobos!",
+        "I like to play Minecraft!"
+      ]
+    },
+    "chat-log": true,
+    "auto-reconnect": true,
+    "auto-reconnect-delay": 2000,
+    "max-reconnect-delay": 120000
+  },
+  "movement": {
+    "enabled": true,
+    "circle-walk": {
+      "enabled": true,
+      "radius": 4,
+      "speed": 3000
+    },
+    "look-around": {
+      "enabled": true,
+      "interval": 5000
+    },
+    "random-jump": {
+      "enabled": true,
+      "interval": 10000
     }
+  },
+  "modules": {
+    "avoidMobs": true,
+    "combat": true,
+    "beds": false,
+    "chat": true,
+    "console-commands": true
+  },
+  "combat": {
+    "attack-mobs": true,
+    "auto-eat": true
+  },
+  "beds": {
+    "pick-up-day": false,
+    "place-night": false
+  },
+  "discord": {
+    "enabled": false,
+    "webhookUrl": "YOUR_DISCORD_WEBHOOK_URL_HERE",
+    "events": {
+      "connect": true,
+      "disconnect": true,
+      "chat": false
+    }
+  },
+  "chat": {
+    "respond": false
   }
 }
-```
